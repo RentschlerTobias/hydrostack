@@ -1,0 +1,157 @@
+#!/usr/bin/env bash
+# Verify that the sandbox actually holds, and that the image actually works.
+#
+#   ./bin/stack-doctor               check stack.sif
+#   ./bin/stack-doctor --agent       check stack-agent.sif
+#   ./bin/stack-doctor --unconfined  run the SAME checks WITHOUT --containall;
+#                                    the containment checks must FAIL.
+#
+# The last mode is the point. A containment test that passes no matter how the
+# container was started tests nothing, and would keep passing after someone
+# quietly drops --containall from a wrapper. So the negative case is a
+# first-class mode: `--unconfined` exits 0 only when containment is correctly
+# reported as BROKEN.
+
+# shellcheck source=bin/_common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
+
+require_apptainer
+
+IMAGE="$STACK_SIF"
+UNCONFINED=0
+EXPECT_AGENT=0
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --agent)      IMAGE="$STACK_AGENT_SIF"; EXPECT_AGENT=1; shift ;;
+        --unconfined) UNCONFINED=1; shift ;;
+        -h|--help)    sed -n '2,16p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        *)            die "unknown option: $1" ;;
+    esac
+done
+
+require_image "$IMAGE"
+
+# A sentinel in the host home. Checking "is $HOME/... visible" with a file we
+# just created beats checking whether some path happens to exist inside the
+# image: the latter passes for the wrong reason on any image that has no
+# /home/<user>.
+SENTINEL="$HOME/.stack-doctor-sentinel-$$"
+echo "if you can read this from inside the container, containment is broken" > "$SENTINEL"
+trap 'rm -f "$SENTINEL"' EXIT
+
+INNER=$(cat <<'INNER_EOF'
+set -u
+pass=0; fail=0; contain_fail=0
+
+ok()   { echo "  OK    $1"; pass=$((pass+1)); }
+bad()  { echo "  FAIL  $1"; fail=$((fail+1)); }
+# Containment failures are counted separately: --unconfined expects exactly
+# these to fail and everything else to pass.
+cbad() { echo "  FAIL  $1"; fail=$((fail+1)); contain_fail=$((contain_fail+1)); }
+
+echo "--- containment ---"
+if [[ -e "$SENTINEL_PATH" ]]; then
+    cbad "host \$HOME is NOT visible (sentinel readable at $SENTINEL_PATH)"
+else
+    ok   "host \$HOME is not visible"
+fi
+
+if command -v apptainer >/dev/null 2>&1; then
+    cbad "no apptainer inside (found: $(command -v apptainer))"
+else
+    ok   "no apptainer inside"
+fi
+
+if [[ -e "$HOST_HOME" ]]; then
+    cbad "host home path $HOST_HOME is not mounted"
+else
+    ok   "host home path is not mounted"
+fi
+
+echo "--- image integrity ---"
+if touch /usr/local/bin/.stack-doctor-write 2>/dev/null; then
+    rm -f /usr/local/bin/.stack-doctor-write
+    bad  "image filesystem is read-only"
+else
+    ok   "image filesystem is read-only"
+fi
+
+if [[ -w /work ]]; then ok "/work is writable"; else bad "/work is writable"; fi
+if [[ -d /opt/stack/quadmesh ]]; then ok "/opt/stack is populated"; else bad "/opt/stack is populated"; fi
+
+echo "--- pipeline capability ---"
+check() {
+    if eval "$2" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi
+}
+check "HexMeshing runs"          'HexMeshing -h'
+check "import dolfinx"           'python3 -c "import dolfinx"'
+check "import torch"             '/opt/venv-sci/bin/python -c "import torch"'
+check "import hydroflow_opt"     '/opt/venv-sci/bin/python -c "import hydroflow_opt"'
+check "import eigenfrequencies"  '/opt/venv-sci/bin/python -c "import eigenfrequencies"'
+check "import optimizer"         '/opt/venv-sci/bin/python -c "import optimizer"'
+check "checkMesh runs"           'checkMesh -help'
+check "import dtOOPythonSWIG"    'bash -lc "source /usr/lib/openfoam/openfoam2606/etc/bashrc; source /dtOO-install/bin/env.sh; /opt/venv-dtoo/bin/python -c \"import dtOOPythonSWIG\""'
+
+echo "--- variant ---"
+echo "  variant: ${STACK_IMAGE_VARIANT:-unknown}"
+if [[ "$EXPECT_AGENT_INNER" == "1" ]]; then
+    if command -v node >/dev/null 2>&1; then ok "node present (agent variant)"; else bad "node present (agent variant)"; fi
+else
+    if command -v node >/dev/null 2>&1; then bad "no node (lean variant)"; else ok "no node (lean variant)"; fi
+fi
+
+echo ""
+echo "RESULT pass=$pass fail=$fail containment_fail=$contain_fail"
+INNER_EOF
+)
+
+echo "stack-doctor: $IMAGE"
+if [[ "$UNCONFINED" -eq 1 ]]; then
+    echo "MODE: unconfined — containment checks are EXPECTED to fail"
+    RUN_ARGS=(--bind "$STACK_WORK:/work" --pwd /work)
+    [[ -d "$STACK_REPOS" ]] && RUN_ARGS+=(--bind "$STACK_REPOS:/opt/stack")
+else
+    build_confine_args
+    RUN_ARGS=("${CONFINE_ARGS[@]}")
+fi
+echo ""
+
+set +e
+output="$(apptainer exec \
+    "${RUN_ARGS[@]}" \
+    --env "SENTINEL_PATH=$SENTINEL" \
+    --env "HOST_HOME=$HOME" \
+    --env "EXPECT_AGENT_INNER=$EXPECT_AGENT" \
+    "$IMAGE" bash -s <<< "$INNER" 2>&1)"
+set -e
+
+echo "$output"
+
+result_line="$(echo "$output" | grep '^RESULT ' || true)"
+[[ -n "$result_line" ]] || die "the checks did not complete; see output above"
+
+fails="$(echo "$result_line" | sed 's/.*fail=\([0-9]*\) .*/\1/')"
+cfails="$(echo "$result_line" | sed 's/.*containment_fail=\([0-9]*\).*/\1/')"
+
+echo ""
+if [[ "$UNCONFINED" -eq 1 ]]; then
+    # Inverted: the negative control is only meaningful if containment really
+    # did break when we removed the flag.
+    if [[ "$cfails" -gt 0 ]]; then
+        echo "PASS (negative control): containment correctly reported BROKEN without --containall."
+        exit 0
+    fi
+    echo "FAIL (negative control): containment still reported intact without --containall."
+    echo "  The containment checks are not actually testing anything. Fix them."
+    exit 1
+fi
+
+if [[ "$fails" -eq 0 ]]; then
+    echo "PASS: sandbox holds and the pipeline is functional."
+    echo "Now run the negative control:  ./bin/stack-doctor --unconfined"
+    exit 0
+fi
+
+echo "FAIL: $fails check(s) failed."
+exit 1

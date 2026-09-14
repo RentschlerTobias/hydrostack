@@ -1,0 +1,11 @@
+# Site configuration: paths differ per host, the checkout does not.
+stack.conf
+
+# Staged repo copy for the image build (install.sh writes it).
+.build-context/
+
+# Images never belong in git.
+*.sif
+*.sif.partial
+*.sif.sha256
+*.sqsh

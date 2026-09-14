@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# A confined interactive shell in the pipeline image.
+#
+#   ./bin/stack-shell              interactive bash
+#   ./bin/stack-shell <command>    run one command and exit
+#
+# Uses stack.sif (no agent tooling). For an agent session use stack-agent.
+
+# shellcheck source=bin/_common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
+
+require_apptainer
+require_image "$STACK_SIF"
+
+build_confine_args
+build_env_args
+
+if [[ $# -eq 0 ]]; then
+    set -- bash --norc -i
+fi
+
+exec apptainer exec \
+    "${CONFINE_ARGS[@]}" \
+    ${ENV_ARGS[@]+"${ENV_ARGS[@]}"} \
+    "$STACK_SIF" "$@"

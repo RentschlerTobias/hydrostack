@@ -1,0 +1,133 @@
+#!/usr/bin/env bash
+# Module entry points.
+#
+#   stack-run cfd-opt  <config.toml> [--dry-run]   CFD + eigenfrequency optimization
+#   stack-run hexblock <mesh.msh>    [--smoke]     hexa block generation
+#   stack-run meshtron train|infer   [args...]     transformer training / inference
+#   stack-run pipeline <config.toml>               all three, chained
+#
+# Each module runs standalone; `pipeline` chains them. That is the whole point
+# of putting them in one image — inside it they are subprocesses of each other,
+# not container hops, which is also what makes live meshtron inference during
+# an optimization possible at all.
+#
+# Runs from the host (wraps itself into the container) or from inside the
+# container (runs directly). The agent calls it as an ordinary command and
+# never needs `apptainer`.
+
+set -euo pipefail
+
+# ── am I inside the image already? ────────────────────────────────────────
+if [[ -f /opt/stack-manifest.txt ]]; then
+    INSIDE=1
+else
+    INSIDE=0
+    # shellcheck source=bin/_common.sh
+    source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
+fi
+
+PY=/opt/venv-sci/bin/python
+DP3D=/opt/stack/quadmesh/domain_partition_3D
+HEX3D="$DP3D/experimentell/hex3d_algohex"
+MESHTRON=/opt/stack/quadmesh/meshtron
+
+usage() { sed -n '2,18p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+
+[[ $# -ge 1 ]] || usage 1
+
+# ── outside: re-enter through the confining wrapper ───────────────────────
+if [[ "$INSIDE" -eq 0 ]]; then
+    require_apptainer
+    require_image "$STACK_SIF"
+    build_confine_args
+    build_env_args
+    exec apptainer exec \
+        "${CONFINE_ARGS[@]}" \
+        ${ENV_ARGS[@]+"${ENV_ARGS[@]}"} \
+        "$STACK_SIF" /opt/stack-bin/stack-run "$@"
+fi
+
+# ── inside ────────────────────────────────────────────────────────────────
+verb="$1"; shift
+
+case "$verb" in
+
+cfd-opt)
+    # hydroflow-opt drives the search; the eigenfrequencies case plugin is
+    # registered through the hydroflow_opt.cases entry point in its
+    # pyproject.toml, so nothing needs wiring here.
+    [[ $# -ge 1 ]] || { echo "usage: stack-run cfd-opt <config.toml> [--dry-run]" >&2; exit 1; }
+    config="$1"; shift
+    if [[ "${1:-}" == "--dry-run" ]]; then
+        # Same semantics as DRY_RUN=1 in eigenfrequencies/cluster/submit_hydroflow_opt.sh:
+        # validate resources, config, case discovery and scratch layout, then stop
+        # before spending anything.
+        exec /opt/venv-sci/bin/hydroflow-opt check "$config"
+    fi
+    exec /opt/venv-sci/bin/hydroflow-opt run "$config" "$@"
+    ;;
+
+hexblock)
+    # The chain recorded in hex3d_algohex/README.md "Quick start". AlgoHex runs
+    # with --backend native: it is built into this image, so there is no
+    # container to start.
+    [[ $# -ge 1 ]] || { echo "usage: stack-run hexblock <mesh.msh|tet.vtk> [--smoke] [--tag T]" >&2; exit 1; }
+    mesh="$1"; shift
+    smoke=0; tag="stack"
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --smoke) smoke=1; shift ;;
+            --tag)   tag="$2"; shift 2 ;;
+            *)       break ;;
+        esac
+    done
+
+    out_dir="${STACK_OUT:-/work/hexblock/$tag}"
+    mkdir -p "$out_dir"
+
+    echo "[hexblock] 1/4 tet preparation"
+    "$PY" "$HEX3D/tet_prep_v5.py" --input "$mesh" --out-dir "$out_dir"
+
+    echo "[hexblock] 2/4 AlgoHex (native)"
+    "$PY" "$HEX3D/run_algohex.py" \
+        --backend native --tag "$tag" --out-dir "$out_dir" \
+        --in-vtk "$out_dir/tet.vtk" "$@"
+
+    if [[ "$smoke" -eq 1 ]]; then
+        echo "[hexblock] --smoke: stopping after AlgoHex"
+        exit 0
+    fi
+
+    echo "[hexblock] 3/4 block extraction"
+    "$PY" "$HEX3D/block_faces.py" "$out_dir"/*_hex_"$tag".ovm
+
+    echo "[hexblock] 4/4 cleanup and validation"
+    exec "$PY" "$HEX3D/clean_blocks.py" --out "$out_dir/blocks.vtk"
+    ;;
+
+meshtron)
+    [[ $# -ge 1 ]] || { echo "usage: stack-run meshtron train|infer [args...]" >&2; exit 1; }
+    mode="$1"; shift
+    case "$mode" in
+        train) exec "$PY" "$MESHTRON/domain_trainer.py" "$@" ;;
+        infer) exec "$PY" "$MESHTRON/inference.py" "$@" ;;
+        *)     echo "unknown meshtron mode: $mode (train|infer)" >&2; exit 1 ;;
+    esac
+    ;;
+
+pipeline)
+    [[ $# -ge 1 ]] || { echo "usage: stack-run pipeline <config.toml>" >&2; exit 1; }
+    config="$1"; shift
+    # Deliberately thin: the chaining that matters (meshtron standing in for
+    # gmsh during an optimization) is the shadow/cutover work in
+    # duty/.omo/plans/roadmap-hydraulic-optimization.md T10-T12, which is NOT
+    # part of this installer. Until that lands, `pipeline` runs the optimization
+    # with the numeric meshing path and the modules stay independently useful.
+    echo "[pipeline] running cfd-opt; block generation and meshtron are"
+    echo "[pipeline] available as separate verbs until the cutover lands (T10-T12)."
+    exec /opt/venv-sci/bin/hydroflow-opt run "$config" "$@"
+    ;;
+
+-h|--help) usage 0 ;;
+*)         echo "unknown module: $verb" >&2; usage 1 ;;
+esac

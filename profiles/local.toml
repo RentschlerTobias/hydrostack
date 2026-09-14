@@ -1,0 +1,69 @@
+# Smoke profile — institute workstation or build laptop, inside the image.
+#
+#   stack-run cfd-opt profiles/local.toml --dry-run   validate only
+#   stack-run cfd-opt profiles/local.toml             run it
+#
+# This profile is NOT a small version of the production run, and the results
+# are not comparable to it. It exists to prove the loop turns: geometry export,
+# CFD, modal solve, resume manifest. Two things are deliberately different from
+# hpc.toml and both change the numbers:
+#
+#   - scipy instead of slepc for the modal backend. They agree to machine
+#     precision on the same problem (pinned by
+#     eigenfrequencies/tests/solver/test_backend_equivalence.py), but scipy is
+#     the sane choice below ~1M DOFs and needs no MUMPS working set.
+#   - a DE budget sized to finish in minutes, which is far too small to
+#     converge on 30 parameters.
+#
+# The production modal solve wants ~10 GB per candidate (MUMPS INFOG(22),
+# measured on the tistos matrix at P2). Check that against MemAvailable before
+# raising concurrent_evaluations here — a workstation has cores to spare long
+# before it has memory to spare.
+
+[run]
+directory = "/work/runs/local-smoke"
+
+[case]
+name = "tistos"
+
+[case.options]
+local_scratch = "/tmp"
+eval_mode = "cfd_only"
+n_rpm = 72.0
+
+[case.options.dtoo]
+runtime = "native"
+python = "/opt/venv-dtoo/bin/python"
+case_dir = "/dtOO/build/test/tistos"
+timeout = 1800
+
+[case.options.cfd]
+runtime = "native"
+setup = []
+timeout = 1800
+mpi_launcher = "mpiexec"
+
+[case.options.modal]
+runtime = "auto"
+element_degree = 2
+num_eigenvalues = 6
+solver_backend = "scipy"
+
+[resources]
+# 12 cores: 2 concurrent x 4 ranks x 1 thread = 8, leaving headroom for the
+# desktop. hydroflow-opt rejects the config outright if
+# concurrent x ranks x threads > available_cpus.
+available_cpus = 12
+concurrent_evaluations = 2
+mpi_ranks = 4
+threads_per_rank = 1
+
+[optimization]
+# Minutes, not hours. Not sized to converge — sized to exercise every stage
+# once and write a resumable manifest.
+islands = 1
+population_size = 4
+generations = 2
+differential_weight = 0.8
+crossover_rate = 0.9
+seed = 20260914

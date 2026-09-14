@@ -1,0 +1,80 @@
+Bootstrap: localimage
+From: {{ BASE_SIF }}
+
+# The agent variant: stack.sif plus node/npm, and nothing else.
+#
+# WHY A DERIVED IMAGE RATHER THAN A BUILD FLAG
+# Two full builds would be two artifacts nobody can prove are the same
+# software. Deriving from the finished stack.sif makes the relationship a fact
+# rather than a claim: the base's sha256 is stamped into %labels below, and
+# install.sh refuses to derive from a base whose checksum has drifted.
+#
+# The published, citable artifact stays stack.sif — it contains no agent
+# tooling at all, which is what lets "others can install this without the agent
+# infrastructure" be literally true.
+#
+# THE AGENTS THEMSELVES ARE NOT INSTALLED HERE. opencode and claude live in the
+# bind-mounted $STACK_AGENT_HOME (mounted as /agent), because both update far
+# more often than this 15-20 GB image should be rebuilt.
+#
+# Build:  ./install.sh --build-agent
+
+%arguments
+    BASE_SIF=stack.sif
+    BASE_SHA=unknown
+
+%post
+    set -eu
+    export DEBIAN_FRONTEND=noninteractive
+
+    # NodeSource rather than Ubuntu's node: noble ships 18.x, and current
+    # agent CLIs want 20+.
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+    apt-get install -y --no-install-recommends nodejs
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+    node --version
+    npm --version
+
+    # /agent is the bind-mount point for the agent installs and their state.
+    # Creating it here means the mount does not depend on --writable-tmpfs.
+    mkdir -p /agent
+
+    {
+        echo "variant: agent"
+        echo "derived-from-sha256: {{ BASE_SHA }}"
+        echo "node: $(node --version)"
+    } >> /opt/stack-manifest.txt
+
+%environment
+    export STACK_IMAGE_VARIANT=agent
+    # Agent installs live on the bind mount, not in the image.
+    export NPM_CONFIG_PREFIX=/agent/npm
+    export PATH=/agent/npm/bin:$PATH
+    export XDG_CONFIG_HOME=/agent/config
+    export XDG_DATA_HOME=/agent/data
+    export XDG_CACHE_HOME=/agent/cache
+
+%labels
+    Purpose turbomachinery-optimization-pipeline-agent
+    Variant agent
+    BaseSha256 {{ BASE_SHA }}
+    AgentTooling node22,npm
+
+%help
+    stack.sif plus node/npm, for confined agent development.
+
+    Start it through the wrapper, never by hand — the wrapper carries the
+    --containall and the bind list that make this a sandbox rather than a
+    shell with extra steps:
+
+        ./bin/stack-agent opencode
+        ./bin/stack-agent claude
+
+    Verify the sandbox before trusting it:
+
+        ./bin/stack-doctor --agent
+
+    Scope of the containment: filesystem only. The agents need outbound network
+    for their APIs, so the network namespace is shared with the host. See the
+    repository README, section "What this sandbox does not do".

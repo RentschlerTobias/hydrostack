@@ -1,0 +1,84 @@
+# Production profile — bwUniCluster 3.0, inside the pipeline image.
+#
+# Derived from eigenfrequencies/cluster/configs/tistos-cfd-only.toml, which is
+# the config the comparison runs actually use. The sizing below is copied from
+# there deliberately: it was measured, not guessed, and changing it silently
+# would make this profile's results incomparable with those runs.
+#
+# Submit with:  sbatch slurm/submit.sh profiles/hpc.toml
+#
+# THE RUNTIME STORY. This file describes stages running INSIDE stack.sif, where
+# dtOO, OpenFOAM and dolfinx are all installed. So no stage starts a container:
+#   dtoo   -> native, because it needs the python3.13 venv and the OpenFOAM +
+#             dtOO environment sourced in that order
+#   cfd    -> native with no setup at all, because the image configures
+#             OpenFOAM itself and sourcing its bashrc on top strips the library
+#             paths and leaves checkMesh dying on libfiniteVolume.so
+#   modal  -> auto, which probes dolfinx, finds it in venv-sci and runs the
+#             solve in-process with no subprocess at all
+#
+# To drive the image from OUTSIDE instead (a job that is not itself in the
+# container), set runtime = "apptainer" and sif = "..." on a stage.
+
+[run]
+directory = "$WS/runs/tistos-cfd-only"
+
+[case]
+name = "tistos"
+
+[case.options]
+local_scratch = "$TMPDIR"
+eval_mode = "cfd_only"
+n_rpm = 72.0
+
+[case.options.dtoo]
+runtime = "native"
+# The dtOO interpreter, not the orchestrator's. venv-sci is python3.12 with
+# dolfinx; the SWIG bindings need the python3.13 venv. Picking this by hand
+# rather than by inference: a stage on the wrong interpreter fails deep inside
+# an import instead of at configuration time.
+python = "/opt/venv-dtoo/bin/python"
+case_dir = "/dtOO/build/test/tistos"
+timeout = 1800
+
+[case.options.cfd]
+runtime = "native"
+# Deliberately empty. See the module docstring of
+# eigenfrequencies/src/eigenfrequencies/hydroflow/physics.py, CFD_SOLVE_SETUP.
+setup = []
+timeout = 3600
+mpi_launcher = "mpiexec"
+
+[case.options.modal]
+runtime = "auto"
+element_degree = 2
+num_eigenvalues = 10
+# slepc past ~1M DOFs; tistos at P2 is 545 247 DOFs and ~10 GB per solve
+# (MUMPS INFOG(22), measured). Memory does not bind on a 256 GiB node.
+solver_backend = "slepc"
+
+[resources]
+# cpu_il: 64 cores, 256 GiB. 16 x 4 x 1 = 64 exactly.
+#
+# Sized from the stage split measured in job 6844xxx: cfd_build 224.1 s is
+# single-threaded dtOO/gmsh and ignores mpi_ranks, cfd_solve 134.5 s scales.
+# Only ~13.5 % of a candidate responds to more ranks, so concurrency buys
+# throughput and ranks buy very little. The mesh is ~60k cells; at 4 ranks that
+# is 15k cells/rank, already near the lower edge of OpenFOAM's scaling.
+#
+# mpi_ranks decides the decomposePar partitioning and therefore the CFD
+# numbers. Keep it identical across configs that are meant to be compared.
+available_cpus = 64
+concurrent_evaluations = 16
+mpi_ranks = 4
+threads_per_rank = 1
+
+[optimization]
+# 30 design parameters; DE wants roughly 2-10x the dimension as population.
+# Total evaluations = islands x population_size x (generations + 1).
+islands = 4
+population_size = 60
+generations = 24
+differential_weight = 0.8
+crossover_rate = 0.9
+seed = 20260911

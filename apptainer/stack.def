@@ -1,0 +1,91 @@
+Bootstrap: docker
+From: ubuntu:24.04
+
+# The pipeline image: dtOO + OpenFOAM, FEniCSx, AlgoHex, torch, and the three
+# repos, in one filesystem.
+#
+# WHY ONE IMAGE AND NOT FOUR
+# Apptainer confines a process to the mounts chosen at container START. Whoever
+# can invoke `apptainer` chooses those mounts and is therefore not confined. A
+# coding agent that had to run `apptainer exec` to reach a second image would
+# hold exactly the tool it is supposed to be denied. So every stage the agent
+# orchestrates lives here, reachable as an ordinary subprocess.
+#
+# WHY UBUNTU 24.04 AND NOT OPENSUSE
+# The stock dtOO image is openSUSE Leap 16.0 and dolfinx/dolfinx:stable is
+# Ubuntu 24.04 — they cannot both be the base. dtOO-ThirdParty carries a
+# Dockerfile.ubuntu that builds the entire dtOO stack on ubuntu:24.04 with
+# OpenFOAM 2606 from the official deb repo, so Ubuntu is the base that lets
+# both halves exist. Stage 20 transcribes that recipe.
+#
+# THIS IMAGE CONTAINS NO AGENT TOOLING, not even node. That is deliberate:
+# stack.sif is the artifact that gets published and shipped to the cluster.
+# The agent variant derives from it via stack-agent.def.
+#
+# Build:  ./install.sh --build    (never `apptainer build` by hand — install.sh
+#                                  stages the repo checkout into the context)
+
+%files
+    apptainer/stages /opt/build-stages
+    .build-context/repos /opt/stack
+    bin /opt/stack-bin
+    profiles /opt/stack-profiles
+
+%post
+    set -eu
+    export DEBIAN_FRONTEND=noninteractive
+    export NCPU="$(nproc)"
+
+    # Stages run in filename order and each one is `set -e`. A stage that fails
+    # fails the build, so a broken image is never written — the same guarantee
+    # the AlgoHex Dockerfile.portable self-test gives, applied to every layer.
+    for stage in /opt/build-stages/*.sh; do
+        echo ""
+        echo "########## $(basename "$stage") ##########"
+        bash "$stage"
+    done
+
+    chmod +x /opt/stack-bin/stack-* || true
+
+    # The build log of what actually got resolved. Several upstream
+    # dependencies are fetched by tag rather than by commit (see 50-algohex),
+    # so "which commit is in this image" is a question only the image can
+    # answer.
+    echo "built: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> /opt/stack-manifest.txt
+
+%environment
+    # Deliberately neutral. In particular this does NOT source OpenFOAM's
+    # bashrc: doing it globally strips OpenFOAM's own library entries and
+    # leaves lib/dummy behind, after which checkMesh dies on libfiniteVolume.so
+    # with a bare exit 127 and an empty log. The per-stage setup lines in
+    # eigenfrequencies/src/eigenfrequencies/hydroflow/physics.py
+    # (DTOO_SETUP / CFD_SOLVE_SETUP / FENICSX_SETUP) are where that belongs,
+    # and they are also what keeps the two MPI stacks off one LD_LIBRARY_PATH.
+    export PYTHONUNBUFFERED=1
+    export STACK_IMAGE_VARIANT=base
+    export STACK_PREFIX=/opt/stack
+
+    # venv-sci is the orchestration environment (hydroflow-opt, the three
+    # repos, dolfinx, torch). The dtOO environment is entered per stage.
+    export PATH=/opt/stack-bin:/opt/venv-sci/bin:/usr/local/bin:$PATH
+
+%labels
+    Purpose turbomachinery-optimization-pipeline
+    Variant base
+    Components dtOO+OpenFOAM2606,FEniCSx,AlgoHex,torch-cu128,quadmesh,eigenfrequencies,optimizer
+    AgentTooling none
+
+%help
+    The turbomachinery optimization pipeline in one image.
+
+    Modules, each runnable on its own or chained:
+        stack-run cfd-opt   <config.toml>   CFD + eigenfrequency optimization
+        stack-run hexblock  <mesh.msh>      hexa block generation (AlgoHex)
+        stack-run meshtron  train|infer     transformer training / inference
+        stack-run pipeline  <config.toml>   all three
+
+    This image carries no agent tooling. For a confined development shell use
+    stack-agent.sif, built by `./install.sh --build-agent`.
+
+    Third-party components and their licences are listed in
+    /opt/stack-manifest.txt. AlgoHex is AGPL-3.0; see the repository README.

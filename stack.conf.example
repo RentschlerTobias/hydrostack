@@ -1,0 +1,30 @@
+# Site configuration for the pipeline stack.
+#
+# Copy to stack.conf and edit. stack.conf is gitignored: it holds paths that
+# differ per host, and the same repo checkout is used on the build laptop, the
+# institute workstation and the cluster.
+#
+#   cp stack.conf.example stack.conf
+
+# Where the built images live. Needs ~25 GB during a build (the unpacked
+# rootfs is the peak, not the finished .sif).
+STACK_IMAGES="${HOME}/stack-images"
+
+# Scratch for apptainer's build. Must NOT be /tmp when /tmp is tmpfs:
+# the dtOO rootfs unpacks to several GB and would land in RAM.
+STACK_TMPDIR="/var/tmp/apptainer"
+
+# Host checkout of the three repos, bind-mounted over the placeholder
+# checkout inside the image. The directory must contain quadmesh/,
+# eigenfrequencies/ and optimizer/.
+STACK_REPOS="${HOME}/repos/duty"
+
+# Working directory exposed to the container as /work: runs, meshes, output.
+STACK_WORK="${HOME}/stack-work"
+
+# Agent installs and their state (opencode, claude). Bind-mounted as /agent so
+# agent updates never require an image rebuild. Only used by stack-agent.
+STACK_AGENT_HOME="${HOME}/.stack-agent"
+
+# Build parallelism. Defaults to nproc.
+#STACK_NCPU=12

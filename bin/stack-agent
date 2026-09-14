@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# Run a coding agent confined to the project.
+#
+#   ./bin/stack-agent opencode
+#   ./bin/stack-agent claude
+#   ./bin/stack-agent bash          a shell with the agent toolchain available
+#
+# What the agent can see:
+#   /work        $STACK_WORK        runs, meshes, output
+#   /opt/stack   $STACK_REPOS       the three repos, editable
+#   /agent       $STACK_AGENT_HOME  its own install and state
+# and nothing else from this machine. In particular not $HOME, not /tmp, and no
+# `apptainer` binary — which is the part that matters, because a process that
+# can run `apptainer exec --bind /:/host` is not confined by anything.
+
+# shellcheck source=bin/_common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
+
+require_apptainer
+require_image "$STACK_AGENT_SIF"
+
+# Fail on the lean image rather than at the first `npx`. stack.sif deliberately
+# has no node, so pointing this script at it is a configuration mistake worth
+# naming.
+if ! apptainer exec "$STACK_AGENT_SIF" bash -c 'command -v node' >/dev/null 2>&1; then
+    die "$STACK_AGENT_SIF has no node — that is the lean stack.sif, not the agent variant.
+  Build the agent image on the build host:  ./install.sh --build-agent"
+fi
+
+# Drift check. The two images are only meaningfully related if the derived one
+# was built from the base that is actually here; install.sh stamps the base
+# checksum into %labels precisely so this can be verified at run time.
+if [[ -f "$STACK_SIF" && -f "$STACK_SIF.sha256" ]]; then
+    labelled="$(apptainer inspect "$STACK_AGENT_SIF" 2>/dev/null \
+        | sed -n 's/^BaseSha256: *//p' | tr -d '[:space:]')"
+    recorded="$(tr -d '[:space:]' < "$STACK_SIF.sha256")"
+    if [[ -n "$labelled" && -n "$recorded" && "$labelled" != "$recorded" ]]; then
+        echo "warning: stack-agent.sif was derived from a different stack.sif" >&2
+        echo "  agent image base: $labelled" >&2
+        echo "  base image here:  $recorded" >&2
+        echo "  Rebuild:  ./install.sh --build-agent" >&2
+    fi
+fi
+
+mkdir -p "$STACK_AGENT_HOME"
+
+build_confine_args
+build_env_args
+CONFINE_ARGS+=(--bind "$STACK_AGENT_HOME:/agent")
+
+if [[ $# -eq 0 ]]; then
+    set -- opencode
+fi
+
+exec apptainer exec \
+    "${CONFINE_ARGS[@]}" \
+    ${ENV_ARGS[@]+"${ENV_ARGS[@]}"} \
+    "$STACK_AGENT_SIF" "$@"
