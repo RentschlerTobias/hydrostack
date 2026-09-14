@@ -35,6 +35,10 @@ usage() { sed -n '2,18p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-
 
 [[ $# -ge 1 ]] || usage 1
 
+# Before anything that needs a container: `--help` must work on a machine with
+# no apptainer and no image.
+case "$1" in -h|--help) usage 0 ;; esac
+
 # ── outside: re-enter through the confining wrapper ───────────────────────
 if [[ "$INSIDE" -eq 0 ]]; then
     require_apptainer

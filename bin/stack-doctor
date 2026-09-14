@@ -15,12 +15,12 @@
 # shellcheck source=bin/_common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 
-require_apptainer
-
 IMAGE="$STACK_SIF"
 UNCONFINED=0
 EXPECT_AGENT=0
 
+# Arguments before environment checks: `--help` has to work on a machine that
+# has no apptainer, which is exactly the machine where someone is reading it.
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --agent)      IMAGE="$STACK_AGENT_SIF"; EXPECT_AGENT=1; shift ;;
@@ -30,6 +30,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+require_apptainer
 require_image "$IMAGE"
 
 # A sentinel in the host home. Checking "is $HOME/... visible" with a file we
