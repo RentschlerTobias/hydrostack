@@ -43,7 +43,24 @@ $PIP install --no-cache-dir --index-url "$TORCH_INDEX" \
 # search for rather than a stack trace 40 lines deep.
 $PIP install --no-cache-dir "pygmo>=2.19.8" \
     || { echo "ERROR: no pygmo wheel for this platform; see docs/build-notes.md" >&2; exit 1; }
-$PIP install --no-cache-dir hydroflow-opt
+
+# hydroflow-opt is third-party (thomasisensee/hydroflow-opt) and PINNED, which
+# an unversioned `pip install` was not. It sits at 0.1.0: a young package from
+# another group, where semver offers no protection because anything below 1.0
+# may break at a minor bump. And what it defines is the artifact contract the
+# eigenfrequencies case plugin is written against — request.json, result.json,
+# outcome.json. A silently newer version would be discovered hours into a
+# cluster run, not at build time.
+#
+# Bump deliberately, or point HYDROFLOW_SRC at a checkout to test against an
+# unreleased version without touching this file.
+HYDROFLOW_VERSION="${HYDROFLOW_VERSION:-0.1.0}"
+if [[ -n "${HYDROFLOW_SRC:-}" ]]; then
+    echo "hydroflow-opt: installing from $HYDROFLOW_SRC (overrides the pin)"
+    $PIP install --no-cache-dir -e "$HYDROFLOW_SRC"
+else
+    $PIP install --no-cache-dir "hydroflow-opt==${HYDROFLOW_VERSION}"
+fi
 
 # ── the research repos ────────────────────────────────────────────────────
 # Three independent checkouts, not one wrapper repository with submodules.
@@ -78,9 +95,23 @@ cat > "$SITE_DIR/stack-repos.pth" <<'EOF'
 /opt/stack/meshtron
 EOF
 
+# Resolved versions, read back from what pip actually installed rather than
+# from the variables above — the pin can be overridden, and the manifest has to
+# say what is in the image, not what was asked for. Computed outside the
+# heredoc-ish block: nesting quotes inside $( ) inside " " is how the first
+# attempt silently wrote "unknown" for everything.
+pkg_version() {
+    $PIP show "$1" 2>/dev/null | awk '/^Version:/ {print $2}'
+}
+HF_VER="$(pkg_version hydroflow-opt)"
+PYGMO_VER="$(pkg_version pygmo)"
+TORCH_VER_ACTUAL="$(pkg_version torch)"
+
 {
     echo "venv-sci: $($PY --version 2>&1)"
-    echo "torch: $TORCH_VERSION from $TORCH_INDEX"
+    echo "torch: ${TORCH_VER_ACTUAL:-unknown} (asked for $TORCH_VERSION from $TORCH_INDEX)"
+    echo "hydroflow-opt: ${HF_VER:-unknown}${HYDROFLOW_SRC:+ (from $HYDROFLOW_SRC)}"
+    echo "pygmo: ${PYGMO_VER:-unknown}"
     echo "eigenfrequencies: editable at /opt/stack/eigenfrequencies"
     echo "on sys.path: /opt/stack/{domain_partition_3D,meshtron}"
 } >> /opt/stack-manifest.txt
