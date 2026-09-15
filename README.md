@@ -21,8 +21,8 @@ comes out.
 | Module | What it does | Verb |
 |---|---|---|
 | frequency / CFD optimization | `eigenfrequencies` + `hydroflow-opt` + dtOO | `stack-run cfd-opt` |
-| hexa block generation | `quadmesh/domain_partition_3D` + AlgoHex | `stack-run hexblock` |
-| transformer training & inference | `quadmesh/meshtron` | `stack-run meshtron` |
+| hexa block generation | `domain_partition_3D` + AlgoHex | `stack-run hexblock` |
+| transformer training & inference | `meshtron` | `stack-run meshtron` |
 | all three | chained | `stack-run pipeline` |
 
 Each module runs on its own. They are in one image so that they can also run
@@ -77,14 +77,21 @@ built image records what actually went in.
 
 ```bash
 mkdir stack && cd stack
-git clone --recurse-submodules git@github.com:RentschlerTobias/quadmesh.git
+git clone git@github.com:RentschlerTobias/domain_partition_3D.git
 git clone git@github.com:RentschlerTobias/eigenfrequencies.git
+git clone git@github.com:RentschlerTobias/meshtron.git
 git clone git@github.com:RentschlerTobias/hydrostack.git
 ```
 
-`quadmesh` needs `--recurse-submodules`: `domain_partition`,
-`domain_partition_3D` and `meshtron` live inside it and are not separate
-top-level checkouts.
+Flat, on purpose. There used to be a `quadmesh` repository that held the first
+three as submodules, and it was retired for the same reason the `repos`
+meta-repository was: a submodule pin only advances when you commit the child
+and then remember to commit the parent, so the wrapper kept claiming states
+that no longer existed. It bought one `git clone` and cost a bookkeeping ritual.
+
+The 2D `domain_partition` repository is not needed. `domain_partition_3D`
+carries its own copy of the cross-field tools under `dp3d/field/` and imports
+nothing from it.
 
 Then, on the build machine:
 
@@ -196,13 +203,22 @@ process:
 | Env | Python | Holds | Used by |
 |---|---|---|---|
 | `/opt/venv-dtoo` | 3.13 | dtOO SWIG bindings, foamlib, pythonocc | geometry export, CFD |
-| `/opt/venv-sci` | 3.12 (`--system-site-packages`) | dolfinx, torch+cu128, pygmo,  hydroflow-opt, the research repos | modal, hex blocks, meshtron, orchestration |
+| `/opt/venv-sci` | 3.12 (`--system-site-packages`) | dolfinx, torch+cu128, pygmo, hydroflow-opt, the research repos | modal, hex blocks, meshtron, orchestration |
 
-The research repos are installed **editable** against `/opt/stack/<repo>`. On the
+The three repositories reach `venv-sci` in two different ways, because only one
+of them is a package:
+
+| Repository | How | Why |
+|---|---|---|
+| `eigenfrequencies` | `pip install -e` | src layout, proper `pyproject.toml` |
+| `domain_partition_3D` | on `sys.path` via `.pth` | `dp3d` is the package; the repo directory is its parent |
+| `meshtron` | on `sys.path` via `.pth` | flat module folder, no `__init__.py`; its own pyproject calls it an app folder, not a package |
+
+Both routes resolve against the fixed path `/opt/stack/<repo>`. On the
 workstation your host checkout is bind-mounted onto exactly that path, so the
-editable install keeps resolving and the code stays editable. On HPC and for
-third parties nothing is mounted and the copy baked into the image runs. One
-recipe, both modes.
+editable install and the `.pth` entries keep pointing at your code and it stays
+editable. On HPC and for third parties nothing is mounted and the copy baked
+into the image runs. One recipe, both modes.
 
 Build stages live in `apptainer/stages/` and run in filename order. Each is
 `set -e`, so a failing stage fails the build and **no image is written** —

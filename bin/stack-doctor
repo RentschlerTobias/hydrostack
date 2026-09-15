@@ -79,7 +79,7 @@ else
 fi
 
 if [[ -w /work ]]; then ok "/work is writable"; else bad "/work is writable"; fi
-if [[ -d /opt/stack/quadmesh ]]; then ok "/opt/stack is populated"; else bad "/opt/stack is populated"; fi
+if [[ -d /opt/stack/domain_partition_3D && -d /opt/stack/eigenfrequencies ]]; then ok "/opt/stack is populated"; else bad "/opt/stack is populated"; fi
 
 echo "--- pipeline capability ---"
 check() {
@@ -90,6 +90,8 @@ check "import dolfinx"           'python3 -c "import dolfinx"'
 check "import torch"             '/opt/venv-sci/bin/python -c "import torch"'
 check "import hydroflow_opt"     '/opt/venv-sci/bin/python -c "import hydroflow_opt"'
 check "import eigenfrequencies"  '/opt/venv-sci/bin/python -c "import eigenfrequencies"'
+check "import dp3d"              '/opt/venv-sci/bin/python -c "import dp3d"'
+check "import meshtron modules"  '/opt/venv-sci/bin/python -c "import config, metrics, hourglass_transformer"'
 check "checkMesh runs"           'checkMesh -help'
 check "import dtOOPythonSWIG"    'bash -lc "source /usr/lib/openfoam/openfoam2606/etc/bashrc; source /dtOO-install/bin/env.sh; /opt/venv-dtoo/bin/python -c \"import dtOOPythonSWIG\""'
 

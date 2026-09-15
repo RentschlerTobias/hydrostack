@@ -3,12 +3,12 @@
 #
 # python3.12 with --system-site-packages so the apt dolfinx from stage 40 stays
 # visible without being vendored. Everything that is not dtOO lives here:
-# torch, hydroflow-opt, and the research repos as editable installs.
+# torch, hydroflow-opt, and the research repos.
 #
-# WHY EDITABLE, IN AN IMAGE THAT IS READ-ONLY
-# The install is recorded against /opt/stack/<repo>, a fixed path. On the agent
+# WHY A FIXED PATH, IN AN IMAGE THAT IS READ-ONLY
+# Everything is installed or pathed against /opt/stack/<repo>. On the agent
 # host the host checkout is bind-mounted onto exactly that path, so the same
-# editable install keeps resolving and the code is editable. On the cluster and
+# editable install and the .pth entries keep resolving. On the cluster and
 # for third parties nothing is mounted and the baked copy runs. One recipe,
 # both modes.
 set -euo pipefail
@@ -23,8 +23,8 @@ $PIP install --no-cache-dir --upgrade pip setuptools wheel
 
 # ── torch ─────────────────────────────────────────────────────────────────
 # ONE torch for the whole environment, which forces a decision the repos have
-# not made between themselves: quadmesh/meshtron/pyproject.toml pins
-# torch==2.11.0 and quadmesh/domain_partition_3D/requirements.txt pins
+# not made between themselves: meshtron/pyproject.toml pins
+# torch==2.11.0 and domain_partition_3D/requirements.txt pins
 # torch==2.13.0. meshtron wins because it is the pin with a uv.lock and an
 # explicit cu128 index behind it; dp3d's torch line is filtered out below
 # rather than being allowed to silently re-resolve this.
@@ -45,29 +45,44 @@ $PIP install --no-cache-dir "pygmo>=2.19.8" \
     || { echo "ERROR: no pygmo wheel for this platform; see docs/build-notes.md" >&2; exit 1; }
 $PIP install --no-cache-dir hydroflow-opt
 
-# ── the research repos, editable at fixed paths ───────────────────────────
-$PIP install --no-cache-dir -e "/opt/stack/eigenfrequencies[optimize,mcp,dev]"
-$PIP install --no-cache-dir -e "/opt/stack/quadmesh"
+# ── the research repos ────────────────────────────────────────────────────
+# Three independent checkouts, not one wrapper repository with submodules.
+# Only eigenfrequencies is a pip-installable package; the other two are
+# directories of modules, so they go on the path instead of being packaged.
 
-# dp3d's remaining dependencies, minus torch (see above). Its requirements.txt
-# is a flat pin list, not a package.
-grep -vE '^\s*(torch|#|$)' /opt/stack/quadmesh/domain_partition_3D/requirements.txt \
+# eigenfrequencies: src layout, proper pyproject, editable.
+$PIP install --no-cache-dir -e "/opt/stack/eigenfrequencies[optimize,mcp,dev]"
+
+# The dependencies the retired wrapper repository used to declare. They belonged
+# to the code in dp3d and meshtron all along, not to the wrapper, so they are
+# stated here rather than inherited from a package that no longer exists.
+$PIP install --no-cache-dir numpy gmsh trimesh networkx "tetgen>=0.8.4"
+
+# domain_partition_3D: `dp3d` is a package inside it, so the REPOSITORY
+# directory goes on the path and `import dp3d` resolves. requirements.txt is a
+# flat pin list, not a package; torch is filtered out because it is pinned
+# above and letting pip re-resolve it here is how two torches end up fighting.
+grep -vE '^\s*(torch|#|$)' /opt/stack/domain_partition_3D/requirements.txt \
     > /tmp/dp3d-reqs.txt || true
 $PIP install --no-cache-dir -r /tmp/dp3d-reqs.txt
 
-# meshtron declares itself "reiner App-Ordner (kein installierbares Paket)", so
-# its dependencies are installed but the directory goes on the path instead of
-# being packaged.
+# meshtron: a flat module folder with no __init__.py, and its own pyproject
+# says so ("reiner App-Ordner, kein installierbares Paket"). Its modules are
+# imported by bare name, so the directory itself goes on the path.
 $PIP install --no-cache-dir \
-    tqdm torch-geometric networkx pandas seaborn optuna gmsh textual matplotlib
+    tqdm torch-geometric pandas seaborn optuna textual matplotlib
 
 SITE_DIR="$($PY -c 'import site; print(site.getsitepackages()[0])')"
-echo "/opt/stack/quadmesh/meshtron" > "$SITE_DIR/meshtron.pth"
+cat > "$SITE_DIR/stack-repos.pth" <<'EOF'
+/opt/stack/domain_partition_3D
+/opt/stack/meshtron
+EOF
 
 {
     echo "venv-sci: $($PY --version 2>&1)"
     echo "torch: $TORCH_VERSION from $TORCH_INDEX"
-    echo "repos: editable at /opt/stack/{quadmesh,eigenfrequencies}"
+    echo "eigenfrequencies: editable at /opt/stack/eigenfrequencies"
+    echo "on sys.path: /opt/stack/{domain_partition_3D,meshtron}"
 } >> /opt/stack-manifest.txt
 
 echo "stage 60 OK"

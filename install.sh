@@ -106,7 +106,7 @@ stage_repos() {
     rm -rf "$ctx"
     mkdir -p "$ctx"
 
-    for repo in quadmesh eigenfrequencies; do
+    for repo in domain_partition_3D eigenfrequencies meshtron; do
         [[ -d "$STACK_REPOS/$repo" ]] \
             || die "$STACK_REPOS/$repo not found; set STACK_REPOS in stack.conf"
         say "staging $repo"

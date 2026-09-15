@@ -15,8 +15,8 @@ STACK_IMAGES="${HOME}/stack-images"
 STACK_TMPDIR="/var/tmp/apptainer"
 
 # Host checkout of the three repos, bind-mounted over the placeholder
-# checkout inside the image. The directory must contain quadmesh/,
-# and eigenfrequencies/.
+# checkout inside the image. The directory must contain domain_partition_3D/,
+# eigenfrequencies/ and meshtron/.
 STACK_REPOS="${HOME}/repos/duty"
 
 # Working directory exposed to the container as /work: runs, meshes, output.

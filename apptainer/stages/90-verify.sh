@@ -53,6 +53,13 @@ check "import torch"           /opt/venv-sci/bin/python -c 'import torch'
 check "import pygmo"           /opt/venv-sci/bin/python -c 'import pygmo'
 check "import hydroflow_opt"   /opt/venv-sci/bin/python -c 'import hydroflow_opt'
 check "import eigenfrequencies" /opt/venv-sci/bin/python -c 'import eigenfrequencies'
+check "import dp3d"            /opt/venv-sci/bin/python -c 'import dp3d'
+# config+metrics are stdlib-only, hourglass_transformer needs torch: together
+# they prove the .pth resolves AND that the torch half of the env is sound.
+# NOT tokenizer_v2/half_edge — those import openmesh, which meshtron's own
+# pyproject keeps as an optional extra because it needs a C++ build and is off
+# the training path. Testing them would fail the build for the wrong reason.
+check "import meshtron mods"   /opt/venv-sci/bin/python -c 'import config, metrics, hourglass_transformer'
 check "import dolfinx in venv" /opt/venv-sci/bin/python -c 'import dolfinx'
 
 echo "--- variant invariant ---"

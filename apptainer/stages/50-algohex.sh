@@ -2,7 +2,7 @@
 # Stage 50 — AlgoHex, built from source.
 #
 # Translated from the upstream Dockerfile at
-# quadmesh/domain_partition_3D/external/algohex-src/Dockerfile.
+# domain_partition_3D/external/algohex-src/Dockerfile.
 #
 # WHY FROM SOURCE AND NOT FROM THE EXISTING IMAGE
 # `algohex:portable` was assembled by hand from a Docker volume that exists on

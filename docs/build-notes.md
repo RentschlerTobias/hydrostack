@@ -62,14 +62,48 @@ releases ship manylinux wheels; if the wheel is missing for your platform the
 stage stops with the package name rather than a resolver trace forty lines
 deep.
 
-**The torch pin conflict.** `quadmesh/meshtron/pyproject.toml` pins
-`torch==2.11.0`; `quadmesh/domain_partition_3D/requirements.txt` pins
+**The torch pin conflict.** `meshtron/pyproject.toml` pins
+`torch==2.11.0`; `domain_partition_3D/requirements.txt` pins
 `torch==2.13.0`. One environment means one torch. Stage 60 takes the meshtron
 pin — it is the one with a `uv.lock` and an explicit cu128 index behind it —
 and filters the torch line out of the dp3d requirements rather than letting pip
 silently re-resolve it. **This divergence belongs upstream**: the two files
 should agree, and until they do this stage is making a decision that is not
 really its to make.
+
+**Two repositories reach the environment by `sys.path`, not by install.**
+`domain_partition_3D` and `meshtron` are not packages — the first holds the
+`dp3d` package one level down, the second is a flat folder of modules with no
+`__init__.py`, which its own pyproject states outright. Stage 60 writes
+`stack-repos.pth` into site-packages with both directories.
+
+That puts some very generic names on the path: `config`, `dataset`, `logger`,
+`metrics`, `policy`, `tokenizer`, `train`, `test`, `validation`. Measured
+rather than assumed, the precedence is
+
+    stdlib  >  site-packages  >  .pth entries
+
+so those modules cannot shadow anything installed. The risk runs the other way:
+an installed package that happens to expose a top-level `config` or `logger`
+would shadow *meshtron's*. Nothing currently installed does.
+
+The primary path is unaffected either way. `stack-run meshtron` invokes the
+scripts directly (`python /opt/stack/meshtron/domain_trainer.py`), and Python
+puts a script's own directory **first** on `sys.path` — which is also how these
+modules resolve each other today. The `.pth` only serves imports from
+elsewhere.
+
+The durable fix is upstream: give meshtron an `__init__.py` and a real package
+name. It would also mean rewriting every internal bare import
+(`from half_edge import order_quads_yx`), so it is a decision for that
+repository, not for this installer.
+
+**Do not self-test meshtron via `tokenizer_v2` or `half_edge`.** Both import
+`openmesh`, which meshtron's pyproject deliberately keeps as an optional extra
+— it needs a C++ build and is off the training path. Stage 90 uses
+`config`, `metrics` and `hourglass_transformer` instead: the first two are
+stdlib-only and prove the `.pth` resolves, the third needs torch and proves
+that half of the environment is sound.
 
 ## Iterating on a stage
 

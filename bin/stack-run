@@ -27,9 +27,9 @@ else
 fi
 
 PY=/opt/venv-sci/bin/python
-DP3D=/opt/stack/quadmesh/domain_partition_3D
+DP3D=/opt/stack/domain_partition_3D
 HEX3D="$DP3D/experimentell/hex3d_algohex"
-MESHTRON=/opt/stack/quadmesh/meshtron
+MESHTRON=/opt/stack/meshtron
 
 usage() { sed -n '2,18p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
