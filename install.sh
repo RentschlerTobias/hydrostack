@@ -56,6 +56,7 @@ STACK_NCPU="${STACK_NCPU:-$(nproc)}"
 STACK_REPOS="${STACK_REPOS:-$(dirname "$REPO_ROOT")}"
 
 SIF="$STACK_IMAGES/stack.sif"
+LOG_DIR="${STACK_LOG_DIR:-$STACK_IMAGES/logs}"
 AGENT_SIF="$STACK_IMAGES/stack-agent.sif"
 SHA_FILE="$SIF.sha256"
 
@@ -199,21 +200,50 @@ build_base() {
     command -v rsync >/dev/null || die "rsync not found (needed to stage the repos)"
     stage_repos
 
+    # A multi-hour build that leaves no log is a build you cannot debug. The
+    # interesting failure — buildDep for occt, say — is thousands of lines into
+    # stage 20, which is exactly where a terminal scrollback gives up. Keep the
+    # whole thing on disk and tell the user where before it starts, not after.
+    mkdir -p "$LOG_DIR"
+    local log="$LOG_DIR/build-$(date -u +%Y%m%dT%H%M%SZ).log"
+
     say "building $SIF with $STACK_NCPU jobs"
     say "this is a from-scratch build: dtOO, OpenFOAM, AlgoHex and torch."
     say "budget hours, not minutes."
+    say "log: $log"
+    say ""
+    say "Leaving it unattended? Nothing here prompts, but apptainer build is"
+    say "NOT resumable — a suspend loses the lot. In another terminal:"
+    say "  systemd-inhibit --what=sleep:idle:handle-lid-switch \\"
+    say "      --why='apptainer build' sleep 8h"
+    say ""
 
     # Build to a temporary name and move on success, so an interrupted build
     # never leaves a half-written .sif that looks usable.
+    #
+    # PIPESTATUS, not $?: with the pipe into tee, $? is tee's status and a
+    # failed build would look like a successful one.
+    set -o pipefail
     apptainer build "${BUILD_PRIV[@]}" \
         "$SIF.partial" \
-        apptainer/stack.def
+        apptainer/stack.def 2>&1 | tee "$log"
+    local rc=${PIPESTATUS[0]}
+    set +o pipefail
+
+    if [[ "$rc" -ne 0 ]]; then
+        rm -f "$SIF.partial"
+        die "build failed (exit $rc). Full log: $log
+  Find the stage:   grep -n '^##########' $log | tail -3
+  Then the error:   less +G $log
+  Re-run one stage without rebuilding: see docs/handoff-first-build.md"
+    fi
 
     mv "$SIF.partial" "$SIF"
     sha256sum "$SIF" | awk '{print $1}' > "$SHA_FILE"
 
     say "built $SIF"
     say "sha256: $(cat "$SHA_FILE")"
+    say "log:    $log"
     say "next: ./install.sh --build-agent   (for the agent host)"
     say "      ./bin/stack-doctor           (verify containment)"
 }
