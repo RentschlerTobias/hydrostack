@@ -6,14 +6,74 @@ verified or explicitly marked as untested.
 ## Where this stands
 
 The repository is complete and pushed. **No image has ever been built.** The
-`.def` files and the seven build stages have never executed — this box had no
-Apptainer, two cores and 3.8 GB free. What *has* been verified: shell syntax on
-every script, `--clone` end to end against local remotes, the TOML profiles
-against hydroflow-opt's resource invariant, and the Python changes in
-`eigenfrequencies` (89 tests) and the AlgoHex native backend.
+`.def` files and the seven build stages have never executed — the machine they
+were written on had no Apptainer, two cores and 3.8 GB free.
 
 So the first build is the experiment. Expect it to fail somewhere in stages
 20–60 and plan to iterate rather than to succeed on the first pass.
+
+## Record what you are building from, before you start
+
+A build is hermetic: `apptainer build` copies `apptainer/stages/` and the staged
+repository snapshot **into the image** via `%files` before `%post` runs. Nothing
+pushed to this repository afterwards can reach a build already in flight.
+
+The hazard is not correctness, it is diagnosis. If stage 60 fails and the
+repository has moved on since, the file you read is not the file that ran. So:
+
+```bash
+git -C . rev-parse HEAD > "$STACK_IMAGES/logs/built-from.txt"
+```
+
+and do **not** pull until the build has finished and been diagnosed.
+
+**If someone else is maintaining this repository, tell them to hold pushes
+while your build runs.** Changing the recipe under a running build costs
+nothing technically and a great deal in confusion.
+
+## What is verified, and what is not
+
+Written down because the distinction is load-bearing and easy to lose.
+
+**Verified by execution:**
+
+| Claim | How |
+|---|---|
+| Every shell script parses | `bash -n` on all 14 |
+| `--clone` works, is idempotent, reports branch and dirty count | end-to-end against three local bare repositories |
+| `install.sh --help` / `--check` work without Apptainer installed | run |
+| Both profiles parse and satisfy `concurrent × ranks × threads ≤ available_cpus` | 8 ≤ 12 and 64 ≤ 64 |
+| `import dp3d` resolves with the repository directory on the path | run |
+| `.pth` entries land *after* site-packages, so they shadow nothing installed | measured in a throwaway venv |
+| `meshtron`'s `config`/`metrics` are stdlib-only; `tokenizer_v2`/`half_edge` need `openmesh` | import-checked |
+| `physics.py` apptainer runtime | 89 tests |
+| `optimizer` runtime detection | 4 tests |
+| `run_algohex --backend native` emits the right argv and skips path translation | function exercised directly |
+| `hydroflow-opt` has exactly one release, 0.1.0 | PyPI queried |
+| No build stage prompts for input | grepped: all `apt-get -y`, `DEBIAN_FRONTEND` set, all clones over https |
+| `eigenfrequencies` merge to `main` was a fast-forward | 0 ahead / 61 behind, 89 tests after |
+
+**Changed with reasoning but never executed:**
+
+| Change | What is unproven |
+|---|---|
+| All seven build stages | none has ever run. This is the bulk of the risk. |
+| `stack.def`, `stack-agent.def` | never built; `%files` paths, `%environment`, `%labels` all unexercised |
+| `stack-doctor`, `stack-shell`, `stack-agent`, `stack-run` | never run against a real image |
+| `slurm/submit.sh` | never submitted |
+| dropping `optimizer` | the *reason* is verified (no imports anywhere); the resulting build is not |
+| the flat three-repo layout | the paths `/opt/stack/{domain_partition_3D,meshtron}` have never existed |
+| `hydroflow-opt` pinned to `0.1.0` | the pin is unexercised in a build. Moot in practice: 0.1.0 is the only release, so a pinned and an unpinned install resolve identically. |
+| build logging and `PIPESTATUS` | syntax-checked only; the failure path has not been triggered |
+| recording resolved SHAs in stage 20 | unexecuted |
+| the two dtOO stages as a whole | transcribed from upstream's Dockerfiles, not run |
+
+Two bugs were found *by* testing rather than by reading, which is the argument
+for distrusting the second table: the manifest lines that report installed
+versions had nested quoting Python rejected, so they would silently have written
+`unknown` for everything; and `git rev-parse --abbrev-ref HEAD` prints `HEAD`
+*and* fails on a detached head, so a `|| echo ?` fallback appended instead of
+replacing and broke a line in two. Both were invisible on reading.
 
 ## Goal
 
