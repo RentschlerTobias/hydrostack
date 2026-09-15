@@ -113,6 +113,10 @@ The 2D `domain_partition` repository is not needed. `domain_partition_3D`
 carries its own copy of the cross-field tools under `dp3d/field/` and imports
 nothing from it.
 
+**Building for the first time?** `docs/handoff-first-build.md` is the
+cold-start guide: the exact sequence, what each stage does, where it is
+likely to break, and how to iterate on one stage without rebuilding.
+
 Apptainer: `pacman -S apptainer` (Arch), or the `.deb` from the
 [Apptainer releases](https://github.com/apptainer/apptainer/releases) on
 Ubuntu. Budget ~40 GB free disk for a base build — the peak is the unpacked
