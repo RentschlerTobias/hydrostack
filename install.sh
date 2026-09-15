@@ -7,17 +7,28 @@
 # workstation the agent runs inside a finished, read-only image and cannot
 # build anything.
 #
+#   ./install.sh --clone          clone the three research repositories
 #   ./install.sh --check          preflight only, changes nothing
 #   ./install.sh --build          build stack.sif       (hours, from scratch)
 #   ./install.sh --build-agent    build stack-agent.sif (minutes, derived)
 #   ./install.sh --stage 50-algohex   re-run one stage into a sandbox (dev loop)
 #
-# Configuration comes from ./stack.conf; see stack.conf.example.
+# Configuration comes from ./stack.conf; see stack.conf.example. With the
+# default layout there is nothing to configure: the repositories are cloned
+# next to this one.
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_ROOT"
+
+# The research repositories, in the order they are cloned and staged. One list,
+# so adding a repository is one line rather than four scattered edits.
+#
+# This script cannot clone the repository it lives in, so hydrostack is not
+# here: `git clone hydrostack` is the step before running it at all.
+STACK_REPO_NAMES=(domain_partition_3D eigenfrequencies meshtron)
+STACK_GIT_BASE="${STACK_GIT_BASE:-git@github.com:RentschlerTobias}"
 
 # ── configuration ─────────────────────────────────────────────────────────
 
@@ -33,6 +44,16 @@ fi
 STACK_IMAGES="${STACK_IMAGES:-$HOME/stack-images}"
 STACK_TMPDIR="${STACK_TMPDIR:-/var/tmp/apptainer}"
 STACK_NCPU="${STACK_NCPU:-$(nproc)}"
+
+# Default: the directory this repository sits in. `--clone` puts the others
+# beside it, so the common case needs no stack.conf at all:
+#
+#     stack/
+#     ├── hydrostack/          <- you are here
+#     ├── domain_partition_3D/
+#     ├── eigenfrequencies/
+#     └── meshtron/
+STACK_REPOS="${STACK_REPOS:-$(dirname "$REPO_ROOT")}"
 
 SIF="$STACK_IMAGES/stack.sif"
 AGENT_SIF="$STACK_IMAGES/stack-agent.sif"
@@ -95,6 +116,52 @@ preflight() {
     export APPTAINER_CACHEDIR="$STACK_TMPDIR/cache"
 }
 
+# ── clone ─────────────────────────────────────────────────────────────────
+
+clone_repos() {
+    command -v git >/dev/null || die "git not found"
+    mkdir -p "$STACK_REPOS"
+
+    say "cloning into $STACK_REPOS"
+    local cloned=0 present=0
+
+    for repo in "${STACK_REPO_NAMES[@]}"; do
+        local dest="$STACK_REPOS/$repo"
+
+        if [[ -d "$dest/.git" ]]; then
+            # Idempotent on purpose: re-running --clone must never touch work in
+            # progress. Report where it stands and move on; updating is the
+            # user's call, in their own repository.
+            local branch dirty
+            # symbolic-ref, not rev-parse --abbrev-ref: on a detached or
+            # unborn HEAD the latter still prints "HEAD" *and* fails, so a
+            # `|| echo ?` fallback appends rather than replaces and the line
+            # comes out across two lines.
+            branch="$(git -C "$dest" symbolic-ref --short -q HEAD 2>/dev/null)" \
+                || branch="detached"
+            dirty="$(git -C "$dest" status --porcelain 2>/dev/null | wc -l)"
+            say "  $repo: already present (branch $branch, $dirty uncommitted)"
+            present=$((present + 1))
+            continue
+        fi
+
+        if [[ -e "$dest" ]]; then
+            die "$dest exists but is not a git repository. Move it aside first."
+        fi
+
+        say "  $repo: cloning"
+        git clone --quiet "$STACK_GIT_BASE/$repo.git" "$dest" \
+            || die "clone of $repo failed.
+  The private repositories need an SSH key on the GitHub account.
+  Override the base URL with STACK_GIT_BASE if you use a different remote."
+        cloned=$((cloned + 1))
+    done
+
+    say "done: $cloned cloned, $present already present"
+    [[ "$present" -eq 0 ]] || say "note: existing checkouts were left untouched"
+    say "next: ./install.sh --check"
+}
+
 # ── build ─────────────────────────────────────────────────────────────────
 
 # The image ships a working checkout of the three repos, not an empty
@@ -106,9 +173,11 @@ stage_repos() {
     rm -rf "$ctx"
     mkdir -p "$ctx"
 
-    for repo in domain_partition_3D eigenfrequencies meshtron; do
-        [[ -d "$STACK_REPOS/$repo" ]] \
-            || die "$STACK_REPOS/$repo not found; set STACK_REPOS in stack.conf"
+    for repo in "${STACK_REPO_NAMES[@]}"; do
+        [[ -d "$STACK_REPOS/$repo" ]] || die \
+"$STACK_REPOS/$repo not found.
+  Clone the research repositories first:  ./install.sh --clone
+  Or point STACK_REPOS at an existing checkout in stack.conf."
         say "staging $repo"
         # Excludes matter: the repos carry multi-GB run outputs, virtualenvs and
         # histories that have no business in an image.
@@ -202,14 +271,35 @@ run_stage() {
 # ── main ──────────────────────────────────────────────────────────────────
 
 usage() {
-    sed -n '2,18p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,19p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
     exit "${1:-0}"
+}
+
+# Report which research repositories are in place. Part of --check because a
+# missing checkout is the cheapest build failure to find before the build.
+check_repos() {
+    local missing=0
+    for repo in "${STACK_REPO_NAMES[@]}"; do
+        if [[ -d "$STACK_REPOS/$repo" ]]; then
+            say "repo: $repo"
+        else
+            say "repo: $repo MISSING"
+            missing=$((missing + 1))
+        fi
+    done
+    [[ "$missing" -eq 0 ]] || die \
+"$missing of ${#STACK_REPO_NAMES[@]} repositories missing under $STACK_REPOS.
+  Clone them:  ./install.sh --clone"
 }
 
 [[ $# -ge 1 ]] || usage 1
 
 case "$1" in
-    --check)        preflight "$MIN_FREE_GB_BASE"; say "preflight OK" ;;
+    --clone)        clone_repos ;;
+    --check)        say "repos: $STACK_REPOS"
+                    check_repos
+                    preflight "$MIN_FREE_GB_BASE"
+                    say "preflight OK" ;;
     --build)        build_base ;;
     --build-agent)  build_agent ;;
     --stage)        [[ $# -eq 2 ]] || usage 1; run_stage "$2" ;;

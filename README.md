@@ -77,31 +77,41 @@ built image records what actually went in.
 
 ```bash
 mkdir stack && cd stack
-git clone git@github.com:RentschlerTobias/domain_partition_3D.git
-git clone git@github.com:RentschlerTobias/eigenfrequencies.git
-git clone git@github.com:RentschlerTobias/meshtron.git
 git clone git@github.com:RentschlerTobias/hydrostack.git
+cd hydrostack
+
+./install.sh --clone         # fetches the three research repositories
+./install.sh --check         # preflight: repos, apptainer, fakeroot, disk, tmpdir
+./install.sh --build         # hours — dtOO, OpenFOAM, AlgoHex, torch
+./install.sh --build-agent   # minutes — derives the agent variant
 ```
 
-Flat, on purpose. There used to be a `quadmesh` repository that held the first
-three as submodules, and it was retired for the same reason the `repos`
-meta-repository was: a submodule pin only advances when you commit the child
-and then remember to commit the parent, so the wrapper kept claiming states
-that no longer existed. It bought one `git clone` and cost a bookkeeping ritual.
+`--clone` puts them next to this repository, which is also where `install.sh`
+looks by default, so the ordinary case needs no `stack.conf` at all:
+
+```
+stack/
+├── hydrostack/           <- you are here
+├── domain_partition_3D/
+├── eigenfrequencies/
+└── meshtron/
+```
+
+It is safe to re-run: existing checkouts are reported and left alone, never
+updated or overwritten. Point `STACK_REPOS` at somewhere else in `stack.conf`
+if your checkouts already live elsewhere, and set `STACK_GIT_BASE` for a
+different remote.
+
+Flat, on purpose. There used to be a `quadmesh` repository holding the three as
+submodules, retired for the same reason the `repos` meta-repository was: a
+submodule pin only advances when you commit the child and then remember to
+commit the parent, so the wrapper kept claiming states that no longer existed.
+It bought one `git clone` — which `--clone` now gives back without the
+bookkeeping.
 
 The 2D `domain_partition` repository is not needed. `domain_partition_3D`
 carries its own copy of the cross-field tools under `dp3d/field/` and imports
 nothing from it.
-
-Then, on the build machine:
-
-```bash
-cd hydrostack
-cp stack.conf.example stack.conf   # set STACK_REPOS to the directory above
-./install.sh --check               # preflight: apptainer, fakeroot, disk, tmpdir
-./install.sh --build               # hours — dtOO, OpenFOAM, AlgoHex, torch
-./install.sh --build-agent         # minutes — derives the agent variant
-```
 
 Apptainer: `pacman -S apptainer` (Arch), or the `.deb` from the
 [Apptainer releases](https://github.com/apptainer/apptainer/releases) on

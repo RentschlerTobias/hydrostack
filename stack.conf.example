@@ -14,10 +14,15 @@ STACK_IMAGES="${HOME}/stack-images"
 # the dtOO rootfs unpacks to several GB and would land in RAM.
 STACK_TMPDIR="/var/tmp/apptainer"
 
-# Host checkout of the three repos, bind-mounted over the placeholder
-# checkout inside the image. The directory must contain domain_partition_3D/,
-# eigenfrequencies/ and meshtron/.
-STACK_REPOS="${HOME}/repos/duty"
+# Host checkout of the three research repositories, bind-mounted over the copy
+# baked into the image. The directory must contain domain_partition_3D/,
+# eigenfrequencies/ and meshtron/ — which is what `./install.sh --clone`
+# produces.
+#
+# Left unset on purpose: the default is the directory hydrostack itself sits
+# in, so the ordinary layout needs no configuration. Set it only if your
+# checkouts live somewhere else.
+#STACK_REPOS="${HOME}/stack"
 
 # Working directory exposed to the container as /work: runs, meshes, output.
 STACK_WORK="${HOME}/stack-work"
