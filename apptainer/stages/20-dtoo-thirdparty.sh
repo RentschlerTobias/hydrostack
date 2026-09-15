@@ -34,6 +34,10 @@ apt-get install -y --no-install-recommends \
 # ── OpenFOAM 2606 from the official repo ──────────────────────────────────
 git clone --depth 1 --branch "$THIRDPARTY_REV" \
     https://github.com/ihs-ustutt/dtOO-ThirdParty.git /dtOO-ThirdParty
+# "main" is a moving target. Resolve it now, so the image can answer which
+# dependency recipes it was actually built from — the same reason stage 50
+# records what AlgoHex's FetchContent resolved to.
+THIRDPARTY_SHA="$(git -C /dtOO-ThirdParty rev-parse HEAD)"
 
 echo "deb [arch=amd64] https://dl.openfoam.com/repos/deb noble main" \
     > /etc/apt/sources.list.d/openfoam.list
@@ -68,6 +72,7 @@ deactivate
 
 # ── foamFine ──────────────────────────────────────────────────────────────
 git clone --depth 1 https://github.com/ihs-ustutt/foamFine.git /foamFine
+FOAMFINE_SHA="$(git -C /foamFine rev-parse HEAD)"
 cd /foamFine/of
 # shellcheck disable=SC1091
 bash -lc 'source /usr/lib/openfoam/openfoam2606/etc/bashrc && wmake all'
@@ -76,7 +81,8 @@ ln -sfn /root/OpenFOAM/user-2606 /root/OpenFOAM/root-2606 || true
 
 {
     echo "openfoam: 2606 (dl.openfoam.com noble)"
-    echo "dtOO-ThirdParty: $THIRDPARTY_REV"
+    echo "dtOO-ThirdParty: $THIRDPARTY_SHA ($THIRDPARTY_REV)"
+    echo "foamFine: $FOAMFINE_SHA"
     echo "dtOO third-party libs: cgns moab openmesh openvolumemesh gmsh occt pythonocc-core"
 } >> /opt/stack-manifest.txt
 
