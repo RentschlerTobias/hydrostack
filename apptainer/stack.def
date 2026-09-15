@@ -72,7 +72,7 @@ From: ubuntu:24.04
 %labels
     Purpose turbomachinery-optimization-pipeline
     Variant base
-    Components dtOO+OpenFOAM2606,FEniCSx,AlgoHex,torch-cu128,quadmesh,eigenfrequencies,optimizer
+    Components dtOO+OpenFOAM2606,FEniCSx,AlgoHex,torch-cu128,quadmesh,eigenfrequencies
     AgentTooling none
 
 %help

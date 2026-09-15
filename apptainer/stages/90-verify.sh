@@ -53,7 +53,6 @@ check "import torch"           /opt/venv-sci/bin/python -c 'import torch'
 check "import pygmo"           /opt/venv-sci/bin/python -c 'import pygmo'
 check "import hydroflow_opt"   /opt/venv-sci/bin/python -c 'import hydroflow_opt'
 check "import eigenfrequencies" /opt/venv-sci/bin/python -c 'import eigenfrequencies'
-check "import optimizer"       /opt/venv-sci/bin/python -c 'import optimizer'
 check "import dolfinx in venv" /opt/venv-sci/bin/python -c 'import dolfinx'
 
 echo "--- variant invariant ---"

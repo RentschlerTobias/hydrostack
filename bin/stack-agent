@@ -7,7 +7,7 @@
 #
 # What the agent can see:
 #   /work        $STACK_WORK        runs, meshes, output
-#   /opt/stack   $STACK_REPOS       the three repos, editable
+#   /opt/stack   $STACK_REPOS       the research repos, editable
 #   /agent       $STACK_AGENT_HOME  its own install and state
 # and nothing else from this machine. In particular not $HOME, not /tmp, and no
 # `apptainer` binary — which is the part that matters, because a process that

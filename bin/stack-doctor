@@ -90,7 +90,6 @@ check "import dolfinx"           'python3 -c "import dolfinx"'
 check "import torch"             '/opt/venv-sci/bin/python -c "import torch"'
 check "import hydroflow_opt"     '/opt/venv-sci/bin/python -c "import hydroflow_opt"'
 check "import eigenfrequencies"  '/opt/venv-sci/bin/python -c "import eigenfrequencies"'
-check "import optimizer"         '/opt/venv-sci/bin/python -c "import optimizer"'
 check "checkMesh runs"           'checkMesh -help'
 check "import dtOOPythonSWIG"    'bash -lc "source /usr/lib/openfoam/openfoam2606/etc/bashrc; source /dtOO-install/bin/env.sh; /opt/venv-dtoo/bin/python -c \"import dtOOPythonSWIG\""'
 

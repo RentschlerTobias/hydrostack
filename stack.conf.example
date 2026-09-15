@@ -16,7 +16,7 @@ STACK_TMPDIR="/var/tmp/apptainer"
 
 # Host checkout of the three repos, bind-mounted over the placeholder
 # checkout inside the image. The directory must contain quadmesh/,
-# eigenfrequencies/ and optimizer/.
+# and eigenfrequencies/.
 STACK_REPOS="${HOME}/repos/duty"
 
 # Working directory exposed to the container as /work: runs, meshes, output.

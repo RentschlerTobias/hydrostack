@@ -5,7 +5,7 @@ OpenFOAM for parametric geometry and CFD, FEniCSx for modal analysis, AlgoHex
 for hexahedral block generation, and a Transformer (meshtron) that is being
 trained to replace the sequential gmsh meshing step.
 
-Three research repositories and three third-party stacks go in; one `.sif` file
+Two research repositories and three third-party stacks go in; one `.sif` file
 comes out.
 
 ```
@@ -29,6 +29,27 @@ Each module runs on its own. They are in one image so that they can also run
 *together*, in one process tree — which is what makes learned meshing during a
 live optimization possible at all, rather than a container hop per candidate.
 
+### What is deliberately not here: `optimizer`
+
+The `optimizer` repository is **not** installed into the image. Nothing in the
+three modules imports it, and its optimization layer duplicates
+`eigenfrequencies/optimize/` while being the weaker of the two everywhere they
+overlap — 51 lines of differential evolution against 223, one backend against
+four, a process-pool evaluator against the cluster-proven Pyro5 one. Its
+evaluator plugins are stubs its own README marks as intentionally unregistered.
+
+It also declares `d3rlpy` as a *core* dependency, which would drag a second
+torch constraint into `venv-sci` next to the pinned `torch==2.11.0+cu128`.
+Paying that for code nothing calls is the wrong trade.
+
+What the repository does hold that exists nowhere else is the offline-RL
+material: `rl/smoke.py`, and a `data/` converter that turns hydroflow-opt run
+artifacts into a d3rlpy dataset — the current format, where
+`eigenfrequencies/optimize/rl/offline_export.py` still reads the superseded
+`de_history*.jsonl`. When roadmap phase D (T13/T14, the RL backend) starts,
+that is the piece to bring in, and re-adding it here is a line in
+`stages/60-venv-sci.sh`.
+
 ## Three hosts, two images
 
 | Host | Role | Image |
@@ -49,7 +70,7 @@ image and cannot build, install or escape anything.
 
 ## Install
 
-The three research repositories are **not** submodules of this one — they are
+The research repositories are **not** submodules of this one — they are
 independent repositories that you clone side by side, and `stack.conf` points
 at them. Nothing here pins their versions; `/opt/stack-manifest.txt` inside a
 built image records what actually went in.
@@ -58,7 +79,6 @@ built image records what actually went in.
 mkdir stack && cd stack
 git clone --recurse-submodules git@github.com:RentschlerTobias/quadmesh.git
 git clone git@github.com:RentschlerTobias/eigenfrequencies.git
-git clone git@github.com:RentschlerTobias/optimizer.git
 git clone git@github.com:RentschlerTobias/hydrostack.git
 ```
 
@@ -176,9 +196,9 @@ process:
 | Env | Python | Holds | Used by |
 |---|---|---|---|
 | `/opt/venv-dtoo` | 3.13 | dtOO SWIG bindings, foamlib, pythonocc | geometry export, CFD |
-| `/opt/venv-sci` | 3.12 (`--system-site-packages`) | dolfinx, torch+cu128, pygmo, hydroflow-opt, the three repos | modal, hex blocks, meshtron, orchestration |
+| `/opt/venv-sci` | 3.12 (`--system-site-packages`) | dolfinx, torch+cu128, pygmo,  hydroflow-opt, the research repos | modal, hex blocks, meshtron, orchestration |
 
-The three repos are installed **editable** against `/opt/stack/<repo>`. On the
+The research repos are installed **editable** against `/opt/stack/<repo>`. On the
 workstation your host checkout is bind-mounted onto exactly that path, so the
 editable install keeps resolving and the code stays editable. On HPC and for
 third parties nothing is mounted and the copy baked into the image runs. One
