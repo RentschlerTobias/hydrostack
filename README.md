@@ -1,4 +1,4 @@
-# pipeline
+# hydrostack
 
 One Apptainer image for the turbomachinery optimization pipeline: dtOO +
 OpenFOAM for parametric geometry and CFD, FEniCSx for modal analysis, AlgoHex
@@ -49,12 +49,28 @@ image and cannot build, install or escape anything.
 
 ## Install
 
-On the build machine:
+The three research repositories are **not** submodules of this one — they are
+independent repositories that you clone side by side, and `stack.conf` points
+at them. Nothing here pins their versions; `/opt/stack-manifest.txt` inside a
+built image records what actually went in.
 
 ```bash
-git clone --recurse-submodules <this repo> pipeline
-cd pipeline
-cp stack.conf.example stack.conf   # set STACK_REPOS, STACK_IMAGES, STACK_WORK
+mkdir stack && cd stack
+git clone --recurse-submodules git@github.com:RentschlerTobias/quadmesh.git
+git clone git@github.com:RentschlerTobias/eigenfrequencies.git
+git clone git@github.com:RentschlerTobias/optimizer.git
+git clone git@github.com:RentschlerTobias/hydrostack.git
+```
+
+`quadmesh` needs `--recurse-submodules`: `domain_partition`,
+`domain_partition_3D` and `meshtron` live inside it and are not separate
+top-level checkouts.
+
+Then, on the build machine:
+
+```bash
+cd hydrostack
+cp stack.conf.example stack.conf   # set STACK_REPOS to the directory above
 ./install.sh --check               # preflight: apptainer, fakeroot, disk, tmpdir
 ./install.sh --build               # hours — dtOO, OpenFOAM, AlgoHex, torch
 ./install.sh --build-agent         # minutes — derives the agent variant
